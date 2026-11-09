@@ -1,12 +1,17 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-###########################################################################
-# Example for simulating all basic models as a single heterogeneous multi-world model with SolverKamino.
-#
-# Command: python -m newton.examples kamino_basic_heterogeneous
-#
-###########################################################################
+"""Example for simulating all basic models as a single heterogeneous multi-world model with SolverKamino.
+
+Success criteria:
+- Six sections show a fixed pendulum, cartpole, two floating pendulum variants, a rigid box, and a
+  four-bar linkage.
+- Right-drag movable bodies: the mechanisms respond while preserving their joints and remaining
+  bounded.
+
+Runs:
+- `python -m newton.examples kamino_basic_heterogeneous`
+"""
 
 import argparse
 
@@ -94,7 +99,9 @@ class Example:
         self.control = self.model.control()
         self.collision_pipeline = newton.CollisionPipeline(self.model)
         self.contacts = self.collision_pipeline.contacts()
-        self.solver_observables = self.solver.observables({newton.solvers.SolverObservableFlags.CONTACT_F})
+        self.solver_observables = self.solver.observables(
+            contacts=self.contacts, kinds={self.solver.ObservableKind.CONTACT_F}
+        )
 
         # Attach the model to the viewer for visualization
         self.viewer.set_model(self.model)

@@ -1,6 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
+"""Visualize body-frame accelerometer readings as colors on three oriented cubes.
+
+Success criteria:
+- Three cubes with X, Y, and Z face markings drop to the ground in different orientations.
+- After settling, the color depends on which body axis is aligned with gravity and is consistent
+  across cubes.
+- Right-drag and reorient a cube, then release and let it settle; its color changes consistently
+  with the new orientation.
+
+Runs:
+- `python -m newton.examples sensor_imu`
+"""
+
 import numpy as np
 import warp as wp
 from pxr import Usd
@@ -128,9 +141,9 @@ class Example:
             soft_contact_max=0,
         )
         self.contacts = self.collision_pipeline.contacts()
-        observable_flags = self.imu.solver_observable_flags | {newton.solvers.SolverObservableFlags.CONTACT_F}
-        self.solver_observables = self.solver.observables(observable_flags)
-        self.imu_observables = self.solver_observables.select(self.imu.solver_observable_flags)
+        observable_kinds = self.imu.solver_observable_kinds | {newton.solvers.SolverBase.ObservableKind.CONTACT_F}
+        self.solver_observables = self.solver.observables(kinds=observable_kinds, contacts=self.contacts)
+        self.imu_observables = self.solver_observables.select(self.imu.solver_observable_kinds)
 
         self.buffer = wp.zeros(self.n_cubes, dtype=wp.vec3)
         self.colors = wp.zeros(self.n_cubes, dtype=wp.vec3)

@@ -1318,7 +1318,7 @@ def test_ball_loop_joint(test, device, solver_fn):
             parent=-1,
             child=link,
             parent_xform=wp.transform_identity(),
-            child_xform=wp.transform(wp.vec3(0.0, 0.25, 0.0), wp.quat_identity()),
+            child_xform=wp.transform(wp.vec3(0.0, 0.5, 0.0), wp.quat_identity()),
         )
     builder.joint_articulation[j_loop] = -1
 
@@ -1536,6 +1536,11 @@ def test_fixed_loop_joint(test, device, solver_fn):
 # Test Registration
 # ---------------------------------------------------------------------------
 
+
+def _steel(model):
+    return newton.solvers.SolverSteel(model)
+
+
 devices = get_test_devices()
 
 for device in devices:
@@ -1565,6 +1570,7 @@ for device in devices:
             newton.solvers.SolverKamino,
             False,
         ),
+        "steel": (_steel, True),
     }
     for solver_name, (solver_fn, uses_gen_coords) in solvers.items():
         if device.is_cuda and solver_name == "mujoco_cpu":
@@ -1632,6 +1638,7 @@ for device in devices:
             ),
             False,
         ),
+        "steel": (_steel, True),
     }
     for solver_name, (solver_fn, uses_gen_coords) in articulation_solvers.items():
         if device.is_cuda and solver_name == "mujoco_cpu":
@@ -1668,7 +1675,7 @@ for device in devices:
         # Torque-free precession exercises the articulated rigid-body dynamics
         # exactly (rigid joints, no soft constraints), so restrict it to the
         # exact generalized-coordinate solvers.
-        if solver_name in ("featherstone", "mujoco_cpu", "mujoco_warp"):
+        if solver_name in ("featherstone", "steel", "mujoco_cpu", "mujoco_warp"):
             add_function_test(
                 TestPhysicsVerification,
                 f"test_torque_free_precession_{solver_name}",
@@ -1709,6 +1716,13 @@ for device in devices:
             solver_fn=newton.solvers.SolverKamino,
             rebound_rtol=0.03,
         )
+    add_function_test(
+        TestPhysicsVerification,
+        "test_restitution_steel",
+        test_restitution,
+        devices=[device],
+        solver_fn=_steel,
+    )
 
     # Full rigid restitution sweep: endpoint and intermediate coefficients,
     # coarse and fine timesteps, and late (gap=0) and predictive contacts.
@@ -1745,7 +1759,9 @@ for device in devices:
             use_mujoco_cpu=False,
         )
 
-    # Kinematic loop and loop joint constraint tests (MuJoCo only)
+    # Kinematic loop and loop joint constraint tests (MuJoCo only). Steel rejects MuJoCo CONNECT
+    # equalities and revolute or fixed loop closures, and its stiff ball closure resolves the initial
+    # 0.29 m closure violation with an orbit below this test's MuJoCo-tuned amplitude bound.
     loop_solvers = {
         "mujoco_cpu": lambda model: newton.solvers.SolverMuJoCo(
             model, use_mujoco_cpu=True, iterations=100, ls_iterations=50

@@ -10,8 +10,8 @@ import warp as wp
 
 import newton
 from newton import ModelFlags
+from newton._src.solvers.mujoco.constants import HINGE_CONNECT_HALF_SPAN
 from newton._src.solvers.mujoco.equality import _add_equality_constraint
-from newton._src.solvers.mujoco.solver_mujoco import HINGE_CONNECT_AXIS_OFFSET
 from newton.solvers import SolverMuJoCo
 
 
@@ -578,11 +578,10 @@ class TestLoopJointConnectConstraintBase(TestEqualityConstraintWithSimStepBase):
         )
         hinge_axis = wp.quat_rotate(parent_quat, hinge_axis_local)
 
-        # First CONNECT anchor1 = parent_anchor (in body_b frame)
-        anchor1_a = parent_anchor
-        # Second CONNECT anchor1 = parent_anchor + offset * hinge_axis (in body_b frame)
-        d = HINGE_CONNECT_AXIS_OFFSET
-        anchor1_b = parent_anchor + wp.vec3(d * hinge_axis[0], d * hinge_axis[1], d * hinge_axis[2])
+        # CONNECT anchor1 = parent_anchor -/+ half span * hinge_axis (in body_b frame)
+        half_offset = HINGE_CONNECT_HALF_SPAN * hinge_axis
+        anchor1_a = parent_anchor - half_offset
+        anchor1_b = parent_anchor + half_offset
 
         # Compute anchor2 using relative transform between parent (body_b) and child (root_body)
         # q_rel = inv(q_child) * q_parent
@@ -755,6 +754,63 @@ class TestLoopJointConnectConstraintBase(TestEqualityConstraintWithSimStepBase):
 
     def test_loop_joint_connect_constraint(self):
         self._test_loop_joint_connect_constraint()
+
+    def test_ball_loop_joint_connect_anchor_off_reference_pose(self):
+        """Keep the authored child anchor of a ball loop joint that is open at the reference pose.
+
+        The anchors sit 0.5 m apart in world space at the zero pose, so a reference-pose projection would give
+        ``(-0.8, 0, 0)`` instead of the authored ``(-0.3, 0, 0)``. Notifications that recompute MuJoCo constants must
+        not reset it either.
+        """
+        anchor_a = wp.vec3(0.2, 0.0, 0.0)
+        anchor_b = wp.vec3(-0.3, 0.0, 0.0)
+        inertia_mat = self._inertia_matrix()
+
+        builder = self._new_mujoco_builder()
+        root = builder.add_link(mass=1.0, inertia=inertia_mat)
+        root_joint = builder.add_joint_fixed(parent=-1, child=root)
+        body_a = builder.add_link(mass=1.0, inertia=inertia_mat)
+        joint_a = builder.add_joint_revolute(parent=root, child=body_a, axis=2)
+        body_b = builder.add_link(mass=1.0, inertia=inertia_mat)
+        joint_b = builder.add_joint_revolute(
+            parent=root,
+            child=body_b,
+            axis=2,
+            parent_xform=wp.transform(wp.vec3(1.0, 0.0, 0.0), wp.quat_identity()),
+        )
+        builder.add_joint_ball(
+            parent=body_a,
+            child=body_b,
+            parent_xform=wp.transform(anchor_a, wp.quat_identity()),
+            child_xform=wp.transform(anchor_b, wp.quat_identity()),
+        )
+        builder.add_articulation(joints=[root_joint, joint_a, joint_b])
+        all_worlds_builder = newton.ModelBuilder(gravity=wp.vec3(0.0), up_axis=1)
+        all_worlds_builder.add_world(builder)
+        sim = self._finalize_sim(all_worlds_builder)
+
+        def assert_anchors(msg):
+            eq_data = [sim.solver.mjw_model.eq_data.numpy()[0][0]]
+            if sim.solver.use_mujoco_cpu:
+                eq_data.append(sim.solver.mj_model.eq_data[0])
+            for data in eq_data:
+                np.testing.assert_allclose(data[0:3], list(anchor_a), atol=1e-5, err_msg=msg)
+                np.testing.assert_allclose(data[3:6], list(anchor_b), atol=1e-5, err_msg=msg)
+
+        self.assertEqual(sim.solver.mj_model.neq, 1)
+        assert_anchors("after construction")
+
+        body_mass = sim.model.body_mass.numpy()
+        body_mass[body_b] = 2.0
+        sim.model.body_mass.assign(body_mass)
+        for flag in (
+            ModelFlags.BODY_INERTIAL_PROPERTIES,
+            ModelFlags.BODY_PROPERTIES,
+            ModelFlags.JOINT_DOF_INERTIAL_PROPERTIES,
+            ModelFlags.ACTUATOR_PROPERTIES,
+        ):
+            sim.solver.notify_model_changed(flag)
+            assert_anchors(f"after {flag!r}")
 
 
 class TestLoopJointConnectConstraintMuJoCoWarp(TestLoopJointConnectConstraintBase, unittest.TestCase):
